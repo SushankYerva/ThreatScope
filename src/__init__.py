@@ -1,0 +1,3 @@
+"""
+ThreatScope core package.
+"""
