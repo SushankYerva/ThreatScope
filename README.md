@@ -1,5 +1,5 @@
 # ThreatScope  
-[![Build Status](https://github.com/<your-username>/threatscope/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/threatscope/actions)
+[![Build Status](https://github.com/SushankYerva/ThreatScope/actions/workflows/ci.yml/badge.svg)](https://github.com/SushankYerva/ThreatScope/actions)
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Made with Scapy](https://img.shields.io/badge/Made%20with-Scapy-orange.svg)](https://scapy.net/)
@@ -9,7 +9,7 @@
 
 ### ⚙️ Overview
 
-**ThreatScope** is an **intermediate-to-advanced cybersecurity and machine-learning project** that performs **real-time network intrusion detection**.
+**ThreatScope** is an **cybersecurity and machine-learning project** that performs **real-time network intrusion detection**.
 
 It captures packets, computes flow-level statistics, applies a trained ML classifier (Random Forest or XGBoost), and logs malicious traffic through a REST API or SQLite database.
 
@@ -169,13 +169,6 @@ This project is released under the [MIT License](LICENSE).
 
 Pull requests are welcome.  
 See [CONTRIBUTING.md](CONTRIBUTING.md) for coding style, branching model, and review process.
-
----
-
-### 🧑‍💻 Maintainer
-
-**Author:** [Your Name](https://github.com/<your-username>)  
-**LinkedIn:** [linkedin.com/in/maharshi007](https://www.linkedin.com/in/maharshi007/)
 
 ---
 
