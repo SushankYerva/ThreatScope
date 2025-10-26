@@ -101,23 +101,63 @@ python -m src.api.main
 ```
 Visit **http://localhost:8000/docs** for Swagger UI.
 
-#### 4. Analyze a PCAP file (offline mode)
+#### 4a. Analyze a PCAP file (offline mode)
 ```python
 from src.controller.realtime_monitor import RealTimeMonitor
 from src.models.predict import ThreatClassifier
 from src.utils.alert_logger import AlertLogger
 
-clf = ThreatClassifier("model_artifacts/model.joblib", "model_artifacts/feature_order.json")
+# paths to model artifacts
+clf = ThreatClassifier(
+    "model_artifacts/model.joblib",
+    "model_artifacts/feature_order.json"
+)
+
+# sqlite db file for alerts
+logger = AlertLogger("threatscope_alerts.db")
+
+# analyze offline pcap
+monitor = RealTimeMonitor(
+    classifier=clf,
+    logger=logger,
+    pcap_file="samples/test_traffic.pcap",  # change if different path
+    capture_filter="tcp or udp"
+)
+
+alerts = monitor.run_once(max_packets=5000)
+
+print("Analysis complete.")
+print("Number of suspicious alerts:", len(alerts))
+for a in alerts:
+    print(a)
+```
+
+#### 4b. Analyze a network traffic (online mode)
+```python
+from src.controller.realtime_monitor import RealTimeMonitor
+from src.models.predict import ThreatClassifier
+from src.utils.alert_logger import AlertLogger
+
+clf = ThreatClassifier(
+    "model_artifacts/model.joblib",
+    "model_artifacts/feature_order.json"
+)
+
 logger = AlertLogger("threatscope_alerts.db")
 
 monitor = RealTimeMonitor(
     classifier=clf,
     logger=logger,
-    pcap_file="samples/test_traffic.pcap"
+    iface="eth0",              # change this to your real interface, e.g. "wlan0" or "Wi-Fi"
+    capture_filter="tcp or udp"
 )
 
-alerts = monitor.run_once(max_packets=5000)
-print(f"Generated {len(alerts)} alerts")
+alerts = monitor.run_once(max_packets=2000)
+
+print("Live capture complete.")
+print("Suspicious alerts:", len(alerts))
+for a in alerts:
+    print(a)
 ```
 
 #### 5. Docker

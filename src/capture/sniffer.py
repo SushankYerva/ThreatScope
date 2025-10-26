@@ -184,10 +184,11 @@ class PacketSniffer:
         """
         Offline capture generator using pyshark.FileCapture.
         pyshark gives higher level protocol parsing of a stored .pcap.
+        We convert each pyshark packet into our PacketRecord format.
         """
         cap = pyshark.FileCapture(
             self.pcap_file,
-            display_filter=self.capture_filter,  # wireshark filter syntax
+            display_filter=self.capture_filter,  # Wireshark filter syntax
             keep_packets=False,
         )
 
@@ -195,16 +196,22 @@ class PacketSniffer:
             if not self._running:
                 break
 
-            # pyshark packet parsing is different than scapy.
-            # We try to map to same PacketRecord structure.
+            # timestamp
             try:
                 ts = float(pkt.sniff_timestamp)
             except Exception:
                 ts = time.time()
 
-            length = int(pkt.length) if hasattr(pkt, "length") else 0
+            # packet length
+            if hasattr(pkt, "length"):
+                try:
+                    length = int(pkt.length)
+                except Exception:
+                    length = 0
+            else:
+                length = 0
 
-            # default values
+            # defaults
             src_ip = None
             dst_ip = None
             src_port = None
@@ -217,25 +224,27 @@ class PacketSniffer:
                 src_ip = getattr(pkt.ip, "src", None)
                 dst_ip = getattr(pkt.ip, "dst", None)
 
-            # transport layer
+            # TCP
             if hasattr(pkt, "tcp"):
                 proto = "TCP"
                 src_port = safe_int(getattr(pkt.tcp, "srcport", None))
                 dst_port = safe_int(getattr(pkt.tcp, "dstport", None))
                 flags = {
-                    "SYN": int(getattr(pkt.tcp, "flags_syn", "0")) if hasattr(pkt.tcp, "flags_syn") else 0,
-                    "ACK": int(getattr(pkt.tcp, "flags_ack", "0")) if hasattr(pkt.tcp, "flags_ack") else 0,
-                    "FIN": int(getattr(pkt.tcp, "flags_fin", "0")) if hasattr(pkt.tcp, "flags_fin") else 0,
-                    "PSH": int(getattr(pkt.tcp, "flags_push", "0")) if hasattr(pkt.tcp, "flags_push") else 0,
+                    "SYN": safe_flag(getattr(pkt.tcp, "flags_syn", None)),
+                    "ACK": safe_flag(getattr(pkt.tcp, "flags_ack", None)),
+                    "FIN": safe_flag(getattr(pkt.tcp, "flags_fin", None)),
+                    "PSH": safe_flag(getattr(pkt.tcp, "flags_push", None)),
                 }
+
+            # UDP
             elif hasattr(pkt, "udp"):
                 proto = "UDP"
                 src_port = safe_int(getattr(pkt.udp, "srcport", None))
                 dst_port = safe_int(getattr(pkt.udp, "dstport", None))
                 flags = None
 
+            # if not IPv4 we skip because the rest of pipeline expects IP fields
             if src_ip is None or dst_ip is None:
-                # skip packets without IP addressing
                 continue
 
             rec = {
@@ -252,8 +261,29 @@ class PacketSniffer:
             yield rec
 
 
+
 def safe_int(x):
     try:
         return int(x)
     except Exception:
         return None
+
+def safe_flag(val):
+    """
+    Convert pyshark TCP flag fields into 0/1.
+    pyshark sometimes returns:
+    - "1"
+    - "0"
+    - "True"
+    - "False"
+    - True / False (actual booleans)
+    We normalize all of that to int 0 or 1.
+    """
+    if isinstance(val, bool):
+        return 1 if val else 0
+    if val is None:
+        return 0
+    s = str(val).strip().lower()
+    if s in ("1", "true", "yes", "y", "set"):
+        return 1
+    return 0

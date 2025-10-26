@@ -35,6 +35,7 @@ from sklearn.metrics import (
 )
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder
 
 
 # These are the canonical features our runtime extractor produces.
@@ -114,21 +115,27 @@ def build_model(model_type: str = "xgboost"):
 def evaluate_model(
     model,
     X_test: pd.DataFrame,
-    y_test: pd.Series,
+    y_test_str: pd.Series,
+    label_encoder: "LabelEncoder",
 ) -> Dict[str, Any]:
     """
-    Return structured metrics for README / CI logs.
-    We compute per-class precision/recall/f1 and macro averages.
-    We also compute ROC AUC if multiclass -> macro average of one-vs-rest.
+    Evaluate model on test set.
+    y_test_str is still the original string labels ("benign", "dos", ...)
+    We will encode/decode as needed.
     """
-    y_pred = model.predict(X_test)
+    # encode test labels to ints
+    y_test_int = label_encoder.transform(y_test_str)
 
+    # predictions (ints)
+    y_pred_int = model.predict(X_test)
+    # convert predicted ints back to strings for human-readable report
+    y_pred_str = label_encoder.inverse_transform(y_pred_int)
+
+    # proba for ROC AUC
     try:
-        # predict_proba is needed for ROC AUC
         y_proba = model.predict_proba(X_test)
-        # multiclass handling for roc_auc_score with OVR
         auc_macro = roc_auc_score(
-            y_test,
+            y_test_int,
             y_proba,
             multi_class="ovr",
             average="macro",
@@ -136,35 +143,50 @@ def evaluate_model(
     except Exception:
         auc_macro = None
 
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        y_test, y_pred, average="macro", zero_division=0
+    precision_macro, recall_macro, f1_macro, _ = precision_recall_fscore_support(
+        y_test_str,  # use string labels for macro metrics
+        y_pred_str,
+        average="macro",
+        zero_division=0,
     )
 
     report = classification_report(
-        y_test, y_pred, output_dict=True, zero_division=0
+        y_test_str,
+        y_pred_str,
+        output_dict=True,
+        zero_division=0,
     )
 
     return {
-        "precision_macro": float(precision),
-        "recall_macro": float(recall),
-        "f1_macro": float(f1),
+        "precision_macro": float(precision_macro),
+        "recall_macro": float(recall_macro),
+        "f1_macro": float(f1_macro),
         "roc_auc_macro": float(auc_macro) if auc_macro is not None else None,
         "per_class": report,
+        "class_mapping": {
+            # store mapping so runtime can understand class ids
+            int(i): cls for i, cls in enumerate(label_encoder.classes_)
+        },
     }
 
 
 def save_artifacts(
     model,
     feature_order: List[str],
+    label_encoder: "LabelEncoder",
     out_dir: str = "model_artifacts",
     model_name: str = "model.joblib",
     feature_name: str = "feature_order.json",
+    labelmap_name: str = "label_mapping.json",
     metrics_name: str = "metrics.json",
     metrics: Dict[str, Any] | None = None,
 ) -> None:
     """
-    Persist model, feature order, and optional metrics.
-    These files are what runtime inference uses.
+    Save:
+    - trained model
+    - feature order
+    - label mapping (int -> string class)
+    - metrics
     """
     p = Path(out_dir)
     p.mkdir(parents=True, exist_ok=True)
@@ -173,6 +195,13 @@ def save_artifacts(
 
     with open(p / feature_name, "w", encoding="utf-8") as f:
         json.dump(feature_order, f, indent=2)
+
+    # explicit mapping from int class -> string label
+    label_mapping = {
+        int(i): cls for i, cls in enumerate(label_encoder.classes_)
+    }
+    with open(p / labelmap_name, "w", encoding="utf-8") as f:
+        json.dump(label_mapping, f, indent=2)
 
     if metrics is not None:
         with open(p / metrics_name, "w", encoding="utf-8") as f:
@@ -190,30 +219,56 @@ def train_pipeline(
     """
     Full training:
     - load data
+    - encode labels to ints
     - split train/test
     - train model
     - evaluate
     - save artifacts
-    Returns metrics dict.
     """
-    X, y = load_dataset(csv_path, label_column=label_column)
+    # 1. load raw features + string labels
+    X, y_str = load_dataset(csv_path, label_column=label_column)
 
-    X_train, X_test, y_train, y_test = train_test_split(
+    # 2. fit label encoder on string labels
+    le = LabelEncoder()
+    y_int = le.fit_transform(y_str)
+    # now benign -> 0, dos -> 1, scan -> 2 (order depends on sorted class names)
+
+    # 3. split train/test using integer labels for y, but keep y_str for clarity too
+    (
+        X_train,
+        X_test,
+        y_train_int,
+        y_test_int,
+        y_train_str,
+        y_test_str,
+    ) = train_test_split(
         X,
-        y,
+        y_int,
+        y_str,
         test_size=test_size,
         random_state=random_state,
-        stratify=y,
+        stratify=y_str,
     )
 
+    # 4. build model
     model = build_model(model_type=model_type)
-    model.fit(X_train, y_train)
 
-    metrics = evaluate_model(model, X_test, y_test)
+    # 5. fit model on integer labels
+    model.fit(X_train, y_train_int)
 
+    # 6. evaluate (need original string labels and encoder for nice reporting)
+    metrics = evaluate_model(
+        model=model,
+        X_test=X_test,
+        y_test_str=y_test_str,
+        label_encoder=le,
+    )
+
+    # 7. save artifacts
     save_artifacts(
         model=model,
         feature_order=FEATURE_ORDER,
+        label_encoder=le,
         out_dir=out_dir,
         metrics=metrics,
     )
